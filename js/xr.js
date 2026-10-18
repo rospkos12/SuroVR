@@ -1,5 +1,7 @@
 // WebXR session handling: request the session, set up the XRWebGLLayer and
 // reference space, run the per-frame loop and route 'select' input.
+import * as mat4 from './mat4.js';
+import { rayFloor } from './scene.js';
 // mode: 'immersive-vr' | 'immersive-ar'. Resolves to the running XRSession.
 export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
   const isAR = mode === 'immersive-ar';
@@ -37,13 +39,15 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
 
   scene.setMode(isAR ? 'ar' : 'vr');
 
-  // 'select' = trigger press / screen tap.
+  let viewer = [0, 1.6, 0]; // latest head position, so drops face the user
+
+  // 'select' = trigger press / screen tap. In AR, taps on the HTML pane are
+  // filtered out by its 'beforexrselect' handler (see main.js).
   session.addEventListener('select', (event) => {
-    if (isAR) return scene.placeAtReticle();
-    const pose = event.frame.getPose(event.inputSource.targetRaySpace, refSpace);
-    if (!pose) return;
-    const m = pose.transform.matrix; // target ray points down its -Z axis
-    scene.interact([m[12], m[13], m[14]], [-m[8], -m[9], -m[10]]);
+    if (isAR) return scene.dropAtReticle(viewer);
+    // VR: point at a shelf preview to pick it, or at the floor to drop it.
+    const ray = rayOf(event.frame.getPose(event.inputSource.targetRaySpace, refSpace));
+    if (ray) scene.interact(ray.origin, ray.dir, viewer);
   });
 
   session.addEventListener('end', () => {
@@ -61,12 +65,23 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
     const pose = frame.getViewerPose(refSpace);
     if (!pose) return; // tracking lost; skip this frame
 
-    // Controller grip poses (VR) for drawing simple controller boxes.
+    const p = pose.transform.position;
+    viewer = [p.x, p.y, p.z];
+
+    // VR controllers: grip box, pointer beam, and a floor reticle where the
+    // first tracked-pointer ray would drop the selected object.
     scene.controllers = [];
+    if (!isAR) scene.reticle.visible = false;
     for (const source of session.inputSources) {
-      if (!source.gripSpace) continue;
-      const grip = frame.getPose(source.gripSpace, refSpace);
-      if (grip) scene.controllers.push(grip.transform.matrix);
+      if (isAR || source.targetRayMode !== 'tracked-pointer') continue;
+      const grip = source.gripSpace && frame.getPose(source.gripSpace, refSpace);
+      const rayPose = frame.getPose(source.targetRaySpace, refSpace);
+      scene.controllers.push({ grip: grip?.transform.matrix, ray: rayPose?.transform.matrix });
+      const ray = rayOf(rayPose);
+      if (ray && !scene.reticle.visible && !scene.pickShelf(ray.origin, ray.dir)) {
+        const hit = rayFloor(ray.origin, ray.dir);
+        if (hit) { scene.reticle.visible = true; scene.reticle.matrix = mat4.translation(...hit); }
+      }
     }
 
     // AR reticle follows the first hit-test result.
@@ -93,4 +108,11 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
   };
   session.requestAnimationFrame(onFrame);
   return session;
+}
+
+// XRPose of a target ray -> { origin, dir }. The ray points down its -Z axis.
+function rayOf(pose) {
+  if (!pose) return null;
+  const m = pose.transform.matrix;
+  return { origin: [m[12], m[13], m[14]], dir: [-m[8], -m[9], -m[10]] };
 }

@@ -61,6 +61,12 @@ export function rotationY(a) {
   return m;
 }
 
+export function rotationZ(a) {
+  const c = Math.cos(a), s = Math.sin(a), m = identity();
+  m[0] = c; m[1] = s; m[4] = -s; m[5] = c;
+  return m;
+}
+
 // Rotate/scale a direction vector [x, y, z] by m (ignores translation).
 export function transformDirection(m, [x, y, z]) {
   return [

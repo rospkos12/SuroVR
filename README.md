@@ -1,14 +1,32 @@
 # SuroVR
 
-A zero-library, pure HTML5 **WebXR** AR/VR starter. No frameworks, no CDNs,
+A zero-library, pure HTML5 **WebXR** AR/VR toybox. No frameworks, no CDNs,
 no build step: just `index.html`, a few plain ES modules and raw WebGL.
 
-- **VR** (`immersive-vr`): floor grid, lit spinning cubes, simple controller
-  boxes. Pull the trigger to spawn a cube, or point at a cube to recolour it.
-- **AR** (`immersive-ar`): camera passthrough with a hit-test reticle. Tap to
-  place a cube on the detected floor or table.
-- **Desktop fallback**: no headset? The VR scene renders on the page. Drag to
-  look around, click to spawn or recolour cubes.
+Pick a toy (🧍 Man, 🐱 Cat, 🚗 Car, 🌳 Tree, 🏠 House) and drop it into the
+world. Every toy is a low-poly blocky model built in code from boxes,
+cylinders, cones and a pyramid. Toys turn to face you when they land and do a
+little drop-and-bounce. **Undo** removes the last toy and **Clear** removes
+them all.
+
+| Mode | Pick a toy | Drop it |
+|------|------------|---------|
+| **Desktop** (no headset) | Big buttons in the bottom pane | Click the floor (drag to look around) |
+| **AR** (`immersive-ar`, phone) | The same pane, shown over the camera via `dom-overlay` | Tap: the toy lands on the hit-test reticle |
+| **VR** (`immersive-vr`, headset) | Point the controller at the floating shelf of mini toys and pull the trigger | Point at the floor (a ring shows the spot) and pull the trigger |
+
+In AR, taps on the pane are kept from also dropping a toy: the pane cancels
+`beforexrselect`. VR has no DOM overlay, so it uses the in-world shelf instead.
+The selected toy is shared between modes, and toys placed on desktop stay
+when you enter or leave VR. AR uses the real room as its coordinate frame, so
+toys start fresh when entering or leaving AR.
+
+### Toy sizes
+
+Everything uses one consistent "toybox" scale in metres: man 1.7 m tall,
+cat about 0.33 m tall, car 2 m long (a half-size toy car), tree 2.4 m,
+house 2.4 m tall (a playhouse rather than a full-size house). In VR and on desktop the
+sky also has a few slowly spinning decoration cubes.
 
 The *Enter VR* / *Enter AR* buttons are feature-detected with
 `navigator.xr.isSessionSupported()`. They stay disabled, with a message, when
@@ -58,13 +76,14 @@ extension can fake a headset for quick checks.
 ## File layout
 
 ```
-index.html        Landing page, canvas, Enter VR / Enter AR buttons, AR dom-overlay root
-js/main.js        Entry point: feature detection, button wiring, desktop fallback loop
+index.html        Page, canvas, Enter VR / Enter AR, toy picker pane (also the AR dom-overlay root)
+js/main.js        Entry point: feature detection, toy picker pane, desktop fallback loop
 js/xr.js          WebXR session: XRWebGLLayer, reference space, frame loop, hit-test, select
-js/scene.js       Shared scene: shaders, grid, cubes, controllers, reticle, ray picking
+js/scene.js       Shared scene: shaders, grid, placed toys + bounce, VR shelf, controllers, reticle
+js/models.js      The five toy models as lists of coloured parts (edit here to add toys)
 js/gl.js          Tiny WebGL helper: shader compile/link, buffers, mesh drawing
 js/mat4.js        Minimal column-major 4x4 matrix math
-js/geometry.js    Procedural cube, floor grid and reticle ring
+js/geometry.js    Procedural cube, cylinder, cone, pyramid, floor grid and reticle ring
 .nojekyll         Serve as-is on GitHub Pages
 ```
 
@@ -79,3 +98,10 @@ js/geometry.js    Procedural cube, floor grid and reticle ring
    then for every view set the viewport and draw with
    `view.projectionMatrix` and `view.transform.inverse.matrix`.
 5. AR clears to fully transparent (alpha 0), so the camera feed shows through.
+
+## Adding a toy
+
+Add an entry to `MODELS` in `js/models.js` with a `label`, an `emoji` and a
+list of parts (`shape`, `pos`, `size`, optional `rot`, `color`). The model
+should stand on `y = 0` with its front facing `+Z`. The pane button and the VR
+shelf slot appear automatically.

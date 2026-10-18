@@ -3,6 +3,7 @@
 import * as mat4 from './mat4.js';
 import { Scene } from './scene.js';
 import { startXR } from './xr.js';
+import { MODELS, KINDS } from './models.js';
 
 const canvas = document.getElementById('scene');
 const statusEl = document.getElementById('status');
@@ -15,6 +16,36 @@ gl.enable(gl.DEPTH_TEST);
 
 const scene = new Scene(gl);
 let session = null; // active XRSession, if any
+window.suro = { scene }; // handy for poking at the scene from the console
+
+// ---------- Object picker pane ----------
+const picker = document.getElementById('picker');
+const pickButtons = {};
+for (const kind of KINDS) {
+  const btn = document.createElement('button');
+  btn.className = 'pick';
+  btn.innerHTML = `<span class="emoji">${MODELS[kind].emoji}</span><span>${MODELS[kind].label}</span>`;
+  btn.addEventListener('click', () => scene.select(kind));
+  picker.insertBefore(btn, picker.querySelector('.tools'));
+  pickButtons[kind] = btn;
+}
+const undoBtn = document.getElementById('undo');
+const clearBtn = document.getElementById('clear');
+undoBtn.addEventListener('click', () => scene.undo());
+clearBtn.addEventListener('click', () => scene.clear());
+
+// Keep the pane in sync with the scene (selection can also change in VR).
+scene.onChange = () => {
+  for (const [kind, btn] of Object.entries(pickButtons)) btn.classList.toggle('selected', kind === scene.selected);
+  undoBtn.disabled = clearBtn.disabled = scene.objects.length === 0;
+};
+scene.onChange();
+
+// In AR (dom-overlay) a tap on the HTML would also fire an XR 'select' and
+// drop an object behind the button. Cancelling 'beforexrselect' stops that.
+for (const el of document.querySelectorAll('.pane')) {
+  el.addEventListener('beforexrselect', (e) => e.preventDefault());
+}
 
 function setStatus(msg) { statusEl.textContent = msg; }
 
@@ -47,14 +78,18 @@ for (const [mode, btn] of Object.entries(buttons)) {
         overlayRoot: document.getElementById('overlay'),
         onEnd: () => {
           session = null;
+          document.body.classList.remove('in-xr', 'in-ar', 'in-vr');
           scene.setMode('inline');
           detect();
           requestAnimationFrame(fallbackFrame);
         },
       });
+      document.body.classList.add('in-xr', mode === 'immersive-ar' ? 'in-ar' : 'in-vr');
       for (const b of Object.values(buttons)) b.disabled = b !== btn;
       btn.textContent = mode === 'immersive-vr' ? 'Exit VR' : 'Exit AR';
-      setStatus(mode === 'immersive-ar' ? 'Point at the floor or a table, then tap to place a cube.' : 'Pull the trigger to spawn or recolour cubes.');
+      setStatus(mode === 'immersive-ar'
+        ? 'Pick a toy below, point at the floor, then tap to drop it.'
+        : 'Point at the shelf to pick a toy, then at the floor and pull the trigger to drop it.');
     } catch (err) {
       setStatus('Could not start session: ' + err.message);
     }
@@ -63,7 +98,7 @@ for (const [mode, btn] of Object.entries(buttons)) {
 
 // ---------- Desktop / non-XR fallback ----------
 const eye = [0, 1.6, 0];
-let yaw = 0, pitch = 0;
+let yaw = 0, pitch = -0.25; // start looking slightly down at the floor
 let drag = null;
 
 function cameraRotation() { return mat4.multiply(mat4.rotationY(yaw), mat4.rotationX(pitch)); }
@@ -81,7 +116,8 @@ canvas.addEventListener('pointermove', (e) => {
   pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005));
 });
 canvas.addEventListener('pointerup', (e) => {
-  // A click without dragging behaves like an XR "select" through that pixel.
+  // A click without dragging drops the selected object where that pixel's
+  // ray meets the floor (y = 0).
   if (drag && drag.moved < 5) {
     const r = canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -89,7 +125,7 @@ canvas.addEventListener('pointerup', (e) => {
     const t = Math.tan(FOV / 2), aspect = r.width / r.height;
     const d = mat4.transformDirection(cameraRotation(), [nx * t * aspect, ny * t, -1]);
     const len = Math.hypot(...d);
-    scene.interact(eye, d.map((v) => v / len));
+    scene.interact(eye, d.map((v) => v / len), eye);
   }
   drag = null;
 });
