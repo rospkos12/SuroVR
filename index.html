@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>SuroVR · WebXR starter</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0d1a; color: #eee; font: 15px/1.4 system-ui, sans-serif; }
+    #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+    #overlay { position: fixed; left: 0; right: 0; bottom: 0; padding: 16px; text-align: center; pointer-events: none; }
+    #overlay > * { pointer-events: auto; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    button { font: inherit; font-weight: 600; padding: 10px 22px; margin: 6px; border: 0; border-radius: 999px; background: #4a8cff; color: #fff; cursor: pointer; }
+    button:disabled { background: #555; color: #aaa; cursor: not-allowed; }
+    #status { margin: 6px 0 0; opacity: 0.85; }
+    .hint { font-size: 13px; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <!-- Also used as the AR dom-overlay root, so the Exit button stays tappable in AR. -->
+  <div id="overlay">
+    <h1>SuroVR</h1>
+    <div class="hint">Desktop: drag to look, click to spawn or recolour a cube.</div>
+    <button id="enter-vr" disabled>Enter VR</button>
+    <button id="enter-ar" disabled>Enter AR</button>
+    <p id="status">Checking WebXR support…</p>
+  </div>
+
+  <noscript>This demo needs JavaScript (ES modules).</noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
