@@ -64,6 +64,21 @@ On desktop Chrome, the
 [Immersive Web Emulator](https://github.com/meta-quest/immersive-web-emulator)
 extension can fake a headset for quick checks.
 
+## Troubleshooting
+
+- **Blank page or no toy buttons right after an update.** GitHub Pages lets
+  browsers cache files for 10 minutes. Do a hard refresh (Ctrl+Shift+R, or
+  Cmd+Shift+R on a Mac). `index.html` loads every module with a `?v=N` suffix
+  through an import map, so a fresh page always gets matching scripts. Bump
+  `N` in `index.html` whenever you change a JS file.
+- **"WebGL is turned off or unavailable".** The browser refused to create a
+  WebGL context. In Firefox, open `about:support` and check the WebGL rows,
+  make sure *Settings → Performance → Use hardware acceleration* is on, and
+  check that `webgl.disabled` is `false` in `about:config`.
+- **Desktop Firefox has no WebXR** on most platforms, so Enter VR / Enter AR
+  stay disabled. The desktop preview (pick, click to drop, drag to look,
+  Undo / Clear) still works.
+
 ## Deploy to GitHub Pages
 
 1. Push this repo to GitHub.

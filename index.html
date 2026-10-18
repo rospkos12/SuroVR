@@ -18,6 +18,7 @@
              background: #4a8cff; color: #fff; cursor: pointer; }
     button:disabled { background: #555; color: #aaa; cursor: not-allowed; }
     #status { margin: 4px 0 0; opacity: 0.85; }
+    #status.error { opacity: 1; color: #ffb3ad; font-weight: 600; }
     .hint { font-size: 13px; opacity: 0.6; }
 
     /* Toy picker: big, friendly, thumb-sized buttons. */
@@ -49,16 +50,27 @@
       <p id="status">Checking WebXR support…</p>
     </div>
 
-    <!-- Toy buttons are added by js/main.js from js/models.js. -->
-    <div class="pane" id="picker" aria-label="Pick a toy">
-      <div class="tools">
-        <button id="undo">↩️ Undo</button>
-        <button id="clear">🗑️ Clear</button>
-      </div>
-    </div>
+    <!-- Toy, Undo and Clear buttons are built by js/main.js from js/models.js. -->
+    <div class="pane" id="picker" aria-label="Pick a toy"></div>
   </div>
 
   <noscript>This demo needs JavaScript (ES modules).</noscript>
-  <script type="module" src="js/main.js"></script>
+  <!-- Cache-busting: GitHub Pages lets browsers cache files for 10 minutes, so
+       after an update a browser could mix new and old modules. Bump "v" here
+       (in all six places) whenever any JS file changes. Browsers without
+       import maps simply ignore this and load the plain URLs. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./js/mat4.js": "./js/mat4.js?v=3",
+      "./js/gl.js": "./js/gl.js?v=3",
+      "./js/geometry.js": "./js/geometry.js?v=3",
+      "./js/models.js": "./js/models.js?v=3",
+      "./js/scene.js": "./js/scene.js?v=3",
+      "./js/xr.js": "./js/xr.js?v=3"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

@@ -18,6 +18,10 @@ export function createProgram(gl, vsSource, fsSource) {
   const program = gl.createProgram();
   gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, vsSource));
   gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fsSource));
+  // Pin aPosition to location 0. Attribute 0 must always be an enabled array;
+  // if a driver gave 0 to aNormal (which is sometimes a constant), browsers
+  // such as Firefox fall back to slow emulation and log a WebGL warning.
+  gl.bindAttribLocation(program, 0, 'aPosition');
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     throw new Error('Program link failed: ' + gl.getProgramInfoLog(program));

@@ -5,32 +5,81 @@ import { Scene } from './scene.js';
 import { startXR } from './xr.js';
 import { MODELS, KINDS } from './models.js';
 
-const canvas = document.getElementById('scene');
-const statusEl = document.getElementById('status');
-const buttons = { 'immersive-vr': document.getElementById('enter-vr'), 'immersive-ar': document.getElementById('enter-ar') };
+// ---------- Page elements (created if missing) ----------
+// Never assume the HTML matches this script: GitHub Pages caches files for
+// 10 minutes, so a browser can briefly pair a fresh main.js with a stale
+// index.html (or the reverse). Anything missing is created instead of crashing.
+function ensure(id, tag, parent, className) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement(tag);
+    el.id = id;
+    if (className) el.className = className;
+    parent.appendChild(el);
+  }
+  return el;
+}
+const overlay = ensure('overlay', 'div', document.body);
+const canvas = ensure('scene', 'canvas', document.body);
+const statusEl = ensure('status', 'p', overlay);
+const buttons = { 'immersive-vr': ensure('enter-vr', 'button', overlay), 'immersive-ar': ensure('enter-ar', 'button', overlay) };
 const labels = { 'immersive-vr': 'Enter VR', 'immersive-ar': 'Enter AR' };
+for (const [mode, b] of Object.entries(buttons)) if (!b.textContent) { b.textContent = labels[mode]; b.disabled = true; }
 
-const gl = canvas.getContext('webgl', { xrCompatible: true, antialias: true, alpha: true });
-if (!gl) throw new Error('WebGL is not available in this browser.');
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('error', isError);
+}
+
+// ---------- WebGL ----------
+// Try an XR-compatible context first, then a plain one (makeXRCompatible() is
+// called before every XR session anyway), then the legacy name.
+function createContext() {
+  const base = { antialias: true, alpha: true };
+  const attempts = [['webgl', { ...base, xrCompatible: true }], ['webgl', base], ['experimental-webgl', base]];
+  for (const [type, attrs] of attempts) {
+    try {
+      const ctx = canvas.getContext(type, attrs);
+      if (ctx) return ctx;
+    } catch { /* try the next option */ }
+  }
+  return null;
+}
+const gl = createContext();
+if (!gl) {
+  for (const b of Object.values(buttons)) b.disabled = true;
+  setStatus('WebGL is turned off or unavailable in this browser, so nothing can be drawn. ' +
+    'In Firefox, check that hardware acceleration is on, and look for WebGL in about:support.', true);
+  throw new Error('WebGL unavailable'); // stop here; the message above stays visible
+}
 gl.enable(gl.DEPTH_TEST);
+
+// Show unexpected errors on the page instead of failing silently.
+window.addEventListener('error', (e) => setStatus('Something went wrong: ' + e.message, true));
+window.addEventListener('unhandledrejection', (e) => setStatus('Something went wrong: ' + (e.reason?.message || e.reason), true));
 
 const scene = new Scene(gl);
 let session = null; // active XRSession, if any
 window.suro = { scene }; // handy for poking at the scene from the console
 
-// ---------- Object picker pane ----------
-const picker = document.getElementById('picker');
+// ---------- Object picker pane (built entirely here, from js/models.js) ----------
+const picker = ensure('picker', 'div', overlay, 'pane');
+picker.textContent = '';
 const pickButtons = {};
 for (const kind of KINDS) {
   const btn = document.createElement('button');
   btn.className = 'pick';
   btn.innerHTML = `<span class="emoji">${MODELS[kind].emoji}</span><span>${MODELS[kind].label}</span>`;
   btn.addEventListener('click', () => scene.select(kind));
-  picker.insertBefore(btn, picker.querySelector('.tools'));
+  picker.appendChild(btn);
   pickButtons[kind] = btn;
 }
-const undoBtn = document.getElementById('undo');
-const clearBtn = document.getElementById('clear');
+const tools = document.createElement('div');
+tools.className = 'tools';
+tools.innerHTML = '<button id="undo">↩️ Undo</button><button id="clear">🗑️ Clear</button>';
+picker.appendChild(tools);
+const undoBtn = tools.querySelector('#undo');
+const clearBtn = tools.querySelector('#clear');
 undoBtn.addEventListener('click', () => scene.undo());
 clearBtn.addEventListener('click', () => scene.clear());
 
@@ -43,11 +92,9 @@ scene.onChange();
 
 // In AR (dom-overlay) a tap on the HTML would also fire an XR 'select' and
 // drop an object behind the button. Cancelling 'beforexrselect' stops that.
-for (const el of document.querySelectorAll('.pane')) {
+for (const el of [picker, ...document.querySelectorAll('.pane')]) {
   el.addEventListener('beforexrselect', (e) => e.preventDefault());
 }
-
-function setStatus(msg) { statusEl.textContent = msg; }
 
 // ---------- Feature detection ----------
 async function detect() {
@@ -60,7 +107,10 @@ async function detect() {
   for (const [mode, btn] of Object.entries(buttons)) {
     let ok = false;
     if (!why) {
-      try { ok = await navigator.xr.isSessionSupported(mode); } catch { ok = false; }
+      // Some desktop browsers take a long time (or never answer) while they
+      // look for VR runtimes; give up after 3 s so the page doesn't hang.
+      const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 3000));
+      try { ok = await Promise.race([navigator.xr.isSessionSupported(mode), timeout]); } catch { ok = false; }
     }
     btn.disabled = !ok;
     btn.textContent = labels[mode];
