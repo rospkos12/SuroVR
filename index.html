@@ -33,6 +33,17 @@
     .tools button { margin: 0; padding: 8px 16px; font-size: 16px; }
     #clear:not(:disabled) { background: #e0524a; }
 
+    /* Edit row: appears above the toys while a placed toy is selected. */
+    #edit { display: none; flex-basis: 100%; justify-content: center; flex-wrap: wrap; gap: 8px; }
+    #picker.editing #edit { display: flex; }
+    #edit button { margin: 0; padding: 12px 18px; font-size: 18px; border-radius: 18px; background: #ffc928; color: #223; }
+    #edit button:disabled { background: #776; color: #ccc; }
+    #edit [data-act="delete"] { background: #e0524a; color: #fff; }
+    #edit [data-act="done"] { background: #39b26b; color: #fff; }
+
+    /* In AR the overlay itself takes touches (tap, drag, pinch); see interact.js. */
+    body.in-ar #overlay { pointer-events: auto; touch-action: none; }
+
     /* In AR keep the screen clear: no title or desktop hint. In VR the page is hidden anyway. */
     body.in-ar h1, body.in-xr .hint { display: none; }
   </style>
@@ -44,7 +55,7 @@
   <div id="overlay">
     <div class="pane" id="top">
       <h1>SuroVR</h1>
-      <div class="hint">Pick a toy, then tap or click the floor to drop it. Drag to look around.</div>
+      <div class="hint">Pick a toy, tap the floor to drop it. Tap a toy to move or resize it. Drag empty space to look around.</div>
       <button id="enter-vr" disabled>Enter VR</button>
       <button id="enter-ar" disabled>Enter AR</button>
       <p id="status">Checking WebXR support…</p>
@@ -57,20 +68,21 @@
   <noscript>This demo needs JavaScript (ES modules).</noscript>
   <!-- Cache-busting: GitHub Pages lets browsers cache files for 10 minutes, so
        after an update a browser could mix new and old modules. Bump "v" here
-       (in all six places) whenever any JS file changes. Browsers without
+       (in every place) whenever any JS file changes. Browsers without
        import maps simply ignore this and load the plain URLs. -->
   <script type="importmap">
   {
     "imports": {
-      "./js/mat4.js": "./js/mat4.js?v=3",
-      "./js/gl.js": "./js/gl.js?v=3",
-      "./js/geometry.js": "./js/geometry.js?v=3",
-      "./js/models.js": "./js/models.js?v=3",
-      "./js/scene.js": "./js/scene.js?v=3",
-      "./js/xr.js": "./js/xr.js?v=3"
+      "./js/mat4.js": "./js/mat4.js?v=4",
+      "./js/gl.js": "./js/gl.js?v=4",
+      "./js/geometry.js": "./js/geometry.js?v=4",
+      "./js/models.js": "./js/models.js?v=4",
+      "./js/scene.js": "./js/scene.js?v=4",
+      "./js/xr.js": "./js/xr.js?v=4",
+      "./js/interact.js": "./js/interact.js?v=4"
     }
   }
   </script>
-  <script type="module" src="js/main.js?v=3"></script>
+  <script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>

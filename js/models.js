@@ -93,9 +93,9 @@ export const MODELS = {
 
 export const KINDS = Object.keys(MODELS);
 
-// Largest side of the model's bounding box (ignoring part rotation), used to
-// size the VR shelf previews.
-export function modelExtent(kind) {
+// Axis-aligned bounding box of a model in its own space (ignoring part
+// rotation): { lo: [x, y, z], hi: [x, y, z] }. Used for picking and previews.
+export function modelBounds(kind) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const p of MODELS[kind].parts) {
     for (let i = 0; i < 3; i++) {
@@ -103,5 +103,11 @@ export function modelExtent(kind) {
       hi[i] = Math.max(hi[i], p.pos[i] + p.size[i] / 2);
     }
   }
+  return { lo, hi };
+}
+
+// Largest side of the model's bounding box, used to size VR shelf previews.
+export function modelExtent(kind) {
+  const { lo, hi } = modelBounds(kind);
   return Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
 }

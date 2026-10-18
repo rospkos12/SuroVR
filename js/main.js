@@ -1,9 +1,10 @@
 // Entry point: WebXR feature detection for the buttons, plus a non-XR
 // fallback that renders the VR scene on the page canvas with drag-to-look.
 import * as mat4 from './mat4.js';
-import { Scene } from './scene.js';
+import { Scene, rayFloor, rayPlane } from './scene.js';
 import { startXR } from './xr.js';
 import { MODELS, KINDS } from './models.js';
+import { attachPointerControls } from './interact.js';
 
 // ---------- Page elements (created if missing) ----------
 // Never assume the HTML matches this script: GitHub Pages caches files for
@@ -60,7 +61,8 @@ window.addEventListener('unhandledrejection', (e) => setStatus('Something went w
 
 const scene = new Scene(gl);
 let session = null; // active XRSession, if any
-window.suro = { scene }; // handy for poking at the scene from the console
+// Handy for poking at the scene from the console (and used by the tests).
+window.suro = { scene, camera: () => (session ? scene.camera : previewCamera), view: () => ({ yaw, pitch }) };
 
 // ---------- Object picker pane (built entirely here, from js/models.js) ----------
 const picker = ensure('picker', 'div', overlay, 'pane');
@@ -76,17 +78,42 @@ for (const kind of KINDS) {
 }
 const tools = document.createElement('div');
 tools.className = 'tools';
-tools.innerHTML = '<button id="undo">↩️ Undo</button><button id="clear">🗑️ Clear</button>';
+tools.innerHTML = '<button id="undo">↩️ Undo</button><button id="clear">🧹 Clear</button>';
 picker.appendChild(tools);
 const undoBtn = tools.querySelector('#undo');
 const clearBtn = tools.querySelector('#clear');
 undoBtn.addEventListener('click', () => scene.undo());
 clearBtn.addEventListener('click', () => scene.clear());
 
+// Edit row: only shown while a placed toy is selected.
+const edit = document.createElement('div');
+edit.id = 'edit';
+edit.innerHTML = `
+  <button data-act="bigger">➕ Bigger</button>
+  <button data-act="smaller">➖ Smaller</button>
+  <button data-act="turn">🔄 Turn</button>
+  <button data-act="delete">🗑️ Delete</button>
+  <button data-act="done">✅ Done</button>`;
+picker.prepend(edit);
+const editActions = {
+  bigger: () => scene.scaleBy(scene.active, 1.25),
+  smaller: () => scene.scaleBy(scene.active, 1 / 1.25),
+  turn: () => scene.turn(scene.active),
+  delete: () => scene.remove(scene.active),
+  done: () => scene.setActive(null),
+};
+for (const btn of edit.querySelectorAll('button')) btn.addEventListener('click', editActions[btn.dataset.act]);
+const [biggerBtn, smallerBtn] = edit.querySelectorAll('button');
+
 // Keep the pane in sync with the scene (selection can also change in VR).
 scene.onChange = () => {
-  for (const [kind, btn] of Object.entries(pickButtons)) btn.classList.toggle('selected', kind === scene.selected);
-  undoBtn.disabled = clearBtn.disabled = scene.objects.length === 0;
+  for (const [kind, btn] of Object.entries(pickButtons)) btn.classList.toggle('selected', !scene.active && kind === scene.selected);
+  undoBtn.disabled = scene.history.length === 0;
+  clearBtn.disabled = scene.objects.length === 0;
+  const a = scene.active;
+  picker.classList.toggle('editing', !!a);
+  biggerBtn.disabled = !a || a.scale >= 3.999;
+  smallerBtn.disabled = !a || a.scale <= 0.2501;
 };
 scene.onChange();
 
@@ -95,6 +122,9 @@ scene.onChange();
 for (const el of [picker, ...document.querySelectorAll('.pane')]) {
   el.addEventListener('beforexrselect', (e) => e.preventDefault());
 }
+// In AR the whole overlay takes touches itself (see interact.js), so cancel
+// XR 'select' for all of it; xr.js only uses 'select' when there's no overlay.
+overlay.addEventListener('beforexrselect', (e) => { if (scene.mode === 'ar') e.preventDefault(); });
 
 // ---------- Feature detection ----------
 async function detect() {
@@ -138,8 +168,8 @@ for (const [mode, btn] of Object.entries(buttons)) {
       for (const b of Object.values(buttons)) b.disabled = b !== btn;
       btn.textContent = mode === 'immersive-vr' ? 'Exit VR' : 'Exit AR';
       setStatus(mode === 'immersive-ar'
-        ? 'Pick a toy below, point at the floor, then tap to drop it.'
-        : 'Point at the shelf to pick a toy, then at the floor and pull the trigger to drop it.');
+        ? 'Pick a toy, then tap the floor to drop it. Tap a toy to move or resize it.'
+        : 'Shelf: pick a toy. Floor: drop it. Hold the trigger on a toy to move it; thumbstick resizes.');
     } catch (err) {
       setStatus('Could not start session: ' + err.message);
     }
@@ -148,39 +178,38 @@ for (const [mode, btn] of Object.entries(buttons)) {
 
 // ---------- Desktop / non-XR fallback ----------
 const eye = [0, 1.6, 0];
-let yaw = 0, pitch = -0.25; // start looking slightly down at the floor
-let drag = null;
-
-function cameraRotation() { return mat4.multiply(mat4.rotationY(yaw), mat4.rotationX(pitch)); }
-
-canvas.addEventListener('pointerdown', (e) => {
-  drag = { x: e.clientX, y: e.clientY, moved: 0 };
-  canvas.setPointerCapture(e.pointerId);
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  drag.moved += Math.abs(dx) + Math.abs(dy);
-  drag.x = e.clientX; drag.y = e.clientY;
-  yaw -= dx * 0.005;
-  pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005));
-});
-canvas.addEventListener('pointerup', (e) => {
-  // A click without dragging drops the selected object where that pixel's
-  // ray meets the floor (y = 0).
-  if (drag && drag.moved < 5) {
-    const r = canvas.getBoundingClientRect();
-    const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
-    const ny = 1 - ((e.clientY - r.top) / r.height) * 2;
-    const t = Math.tan(FOV / 2), aspect = r.width / r.height;
-    const d = mat4.transformDirection(cameraRotation(), [nx * t * aspect, ny * t, -1]);
-    const len = Math.hypot(...d);
-    scene.interact(eye, d.map((v) => v / len), eye);
-  }
-  drag = null;
-});
-
 const FOV = Math.PI / 3;
+let yaw = 0, pitch = -0.25; // start looking slightly down at the floor
+let previewCamera = null;   // { projection, world }, updated every frame
+
+// Mouse / touch on the canvas: select, drag-move, pinch/wheel resize, drag
+// on empty space to look around, tap empty floor to drop or let go.
+attachPointerControls(canvas, scene, {
+  enabled: () => !session,
+  getCamera: () => previewCamera,
+  look: (dx, dy) => {
+    yaw -= dx * 0.005;
+    pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005));
+  },
+  drop: (ray) => {
+    const hit = rayFloor(ray.origin, ray.dir);
+    if (hit) scene.drop(hit, eye);
+  },
+});
+
+// AR with dom-overlay: the overlay covers the screen and receives the touches.
+// Taps drop toys where the finger points, on the surface the reticle found.
+attachPointerControls(overlay, scene, {
+  enabled: () => !!session && scene.mode === 'ar',
+  getCamera: () => scene.camera,
+  drop: (ray) => {
+    if (!scene.reticle.visible) return;
+    const hit = rayPlane(ray.origin, ray.dir, scene.reticle.matrix[13]);
+    if (hit) scene.drop(hit, scene.viewer);
+    else scene.dropAtReticle(scene.viewer);
+  },
+});
+
 let lastTime = null;
 
 function fallbackFrame(time) {
@@ -201,7 +230,9 @@ function fallbackFrame(time) {
 
   // view = inverse(T(eye) * Ry(yaw) * Rx(pitch))
   const view = mat4.mul(mat4.rotationX(-pitch), mat4.rotationY(-yaw), mat4.translation(-eye[0], -eye[1], -eye[2]));
-  scene.draw(mat4.perspective(FOV, w / h, 0.05, 100), view);
+  const projection = mat4.perspective(FOV, w / h, 0.05, 100);
+  previewCamera = { projection, world: mat4.mul(mat4.translation(...eye), mat4.rotationY(yaw), mat4.rotationX(pitch)) };
+  scene.draw(projection, view);
 }
 
 scene.setMode('inline');

@@ -1,7 +1,9 @@
 // WebXR session handling: request the session, set up the XRWebGLLayer and
-// reference space, run the per-frame loop and route 'select' input.
+// reference space, run the per-frame loop and route controller input:
+// trigger/tap to pick, drop, select and grab-move toys, thumbstick to resize.
 import * as mat4 from './mat4.js';
-import { rayFloor } from './scene.js';
+import { rayFloor, rayPlane } from './scene.js';
+
 // mode: 'immersive-vr' | 'immersive-ar'. Resolves to the running XRSession.
 export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
   const isAR = mode === 'immersive-ar';
@@ -39,19 +41,57 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
 
   scene.setMode(isAR ? 'ar' : 'vr');
 
-  let viewer = [0, 1.6, 0]; // latest head position, so drops face the user
+  scene.viewer = [0, 1.6, 0]; // latest head position, so drops face the user
 
-  // 'select' = trigger press / screen tap. In AR, taps on the HTML pane are
-  // filtered out by its 'beforexrselect' handler (see main.js).
-  session.addEventListener('select', (event) => {
-    if (isAR) return scene.dropAtReticle(viewer);
-    // VR: point at a shelf preview to pick it, or at the floor to drop it.
+  // With a DOM overlay, AR touches are handled as normal pointer events by
+  // interact.js (main.js cancels 'beforexrselect'), so skip XR select there.
+  const useSelect = () => !(isAR && session.domOverlayState);
+  const grabs = new Map(); // inputSource -> { obj, token, offset }
+
+  // Trigger down / finger down: grab a toy if the ray hits one.
+  session.addEventListener('selectstart', (event) => {
+    grabs.delete(event.inputSource);
+    if (!useSelect()) return;
     const ray = rayOf(event.frame.getPose(event.inputSource.targetRaySpace, refSpace));
-    if (ray) scene.interact(ray.origin, ray.dir, viewer);
+    const hit = ray && !scene.pickShelf(ray.origin, ray.dir) && scene.pickHit(ray.origin, ray.dir);
+    if (!hit) return;
+    scene.setActive(hit.obj);
+    grabs.set(event.inputSource, scene.startGrab(hit, ray.origin));
   });
+
+  // Trigger up: finish a grab (one undo step).
+  session.addEventListener('selectend', (event) => {
+    const g = grabs.get(event.inputSource);
+    if (g) { scene.endEdit(g.token); g.done = true; }
+  });
+
+  // Full click that didn't grab a toy: shelf -> choose kind, floor -> drop a
+  // toy or let go of the selected one.
+  session.addEventListener('select', (event) => {
+    if (!useSelect()) return;
+    if (grabs.get(event.inputSource)?.done) return grabs.delete(event.inputSource);
+    const ray = rayOf(event.frame.getPose(event.inputSource.targetRaySpace, refSpace));
+    if (!ray) return;
+    const kind = scene.pickShelf(ray.origin, ray.dir);
+    if (kind) return scene.select(kind);
+    scene.tapEmpty(() => {
+      if (!isAR) {
+        const hit = rayFloor(ray.origin, ray.dir);
+        if (hit) scene.drop(hit, scene.viewer);
+      } else if (scene.reticle.visible) {
+        // AR without overlay: drop where the tap points, on the reticle's surface.
+        const hit = rayPlane(ray.origin, ray.dir, scene.reticle.matrix[13]);
+        if (hit) scene.drop(hit, scene.viewer); else scene.dropAtReticle(scene.viewer);
+      }
+    });
+  });
+
+  let stickEdit = null; // in-progress thumbstick resize
 
   session.addEventListener('end', () => {
     hitTestSource?.cancel();
+    for (const g of grabs.values()) if (!g.done) scene.endEdit(g.token);
+    scene.camera = null;
     scene.controllers = [];
     onEnd?.();
   });
@@ -60,13 +100,38 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
   const onFrame = (time, frame) => {
     session.requestAnimationFrame(onFrame);
     scene.update(last === null ? 0 : time - last);
-    last = time;
 
     const pose = frame.getViewerPose(refSpace);
     if (!pose) return; // tracking lost; skip this frame
 
     const p = pose.transform.position;
-    viewer = [p.x, p.y, p.z];
+    scene.viewer = [p.x, p.y, p.z];
+    // Camera for screen-space picking (AR overlay touches).
+    const v0 = pose.views[0];
+    scene.camera = { projection: v0.projectionMatrix, world: v0.transform.matrix };
+    const dt = last === null ? 0 : time - last;
+
+    // Grabbed toys follow their controller / finger ray across the floor.
+    for (const [source, g] of grabs) {
+      if (g.done) continue;
+      const ray = rayOf(frame.getPose(source.targetRaySpace, refSpace));
+      if (ray) scene.dragGrab(g, ray.origin, ray.dir);
+    }
+
+    // Thumbstick up/down resizes the selected toy (xr-standard: axes[3]).
+    let stickY = 0;
+    for (const source of session.inputSources) {
+      const axes = source.gamepad?.axes || [];
+      const y = axes.length >= 4 ? axes[3] : axes[1] || 0;
+      if (Math.abs(y) > Math.abs(stickY)) stickY = y;
+    }
+    if (scene.active && Math.abs(stickY) > 0.4) {
+      if (!stickEdit) stickEdit = scene.beginEdit(scene.active);
+      scene.setScale(scene.active, scene.active.scale * Math.exp(-stickY * dt * 0.0015)); // up = bigger
+    } else if (stickEdit) {
+      scene.endEdit(stickEdit);
+      stickEdit = null;
+    }
 
     // VR controllers: grip box, pointer beam, and a floor reticle where the
     // first tracked-pointer ray would drop the selected object.
@@ -78,7 +143,7 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
       const rayPose = frame.getPose(source.targetRaySpace, refSpace);
       scene.controllers.push({ grip: grip?.transform.matrix, ray: rayPose?.transform.matrix });
       const ray = rayOf(rayPose);
-      if (ray && !scene.reticle.visible && !scene.pickShelf(ray.origin, ray.dir)) {
+      if (ray && !scene.reticle.visible && !scene.pickShelf(ray.origin, ray.dir) && !scene.pickObject(ray.origin, ray.dir) && !grabs.size) {
         const hit = rayFloor(ray.origin, ray.dir);
         if (hit) { scene.reticle.visible = true; scene.reticle.matrix = mat4.translation(...hit); }
       }
@@ -92,6 +157,7 @@ export async function startXR(mode, gl, scene, { overlayRoot, onEnd } = {}) {
       if (hitPose) scene.reticle.matrix = hitPose.transform.matrix;
     }
 
+    last = time;
     const layer = session.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     // VR: dark sky. AR: fully transparent so the real world shows through.

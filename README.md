@@ -6,13 +6,15 @@ no build step: just `index.html`, a few plain ES modules and raw WebGL.
 Pick a toy (🧍 Man, 🐱 Cat, 🚗 Car, 🌳 Tree, 🏠 House) and drop it into the
 world. Every toy is a low-poly blocky model built in code from boxes,
 cylinders, cones and a pyramid. Toys turn to face you when they land and do a
-little drop-and-bounce. **Undo** removes the last toy and **Clear** removes
-them all.
+little drop-and-bounce. Tap a placed toy to **select** it (a yellow ring
+appears around it), then **move**, **resize**, **turn** or **delete** it.
+**Undo** steps back through everything: drops, moves, resizes, turns,
+deletes, even **Clear**.
 
 | Mode | Pick a toy | Drop it |
 |------|------------|---------|
 | **Desktop** (no headset) | Big buttons in the bottom pane | Click the floor (drag to look around) |
-| **AR** (`immersive-ar`, phone) | The same pane, shown over the camera via `dom-overlay` | Tap: the toy lands on the hit-test reticle |
+| **AR** (`immersive-ar`, phone) | The same pane, shown over the camera via `dom-overlay` | Tap the floor or table where it should go (once the reticle has found a surface) |
 | **VR** (`immersive-vr`, headset) | Point the controller at the floating shelf of mini toys and pull the trigger | Point at the floor (a ring shows the spot) and pull the trigger |
 
 In AR, taps on the pane are kept from also dropping a toy: the pane cancels
@@ -20,6 +22,30 @@ In AR, taps on the pane are kept from also dropping a toy: the pane cancels
 The selected toy is shared between modes, and toys placed on desktop stay
 when you enter or leave VR. AR uses the real room as its coordinate frame, so
 toys start fresh when entering or leaving AR.
+
+### Moving and resizing toys
+
+Tap or click a toy to select it, and tap empty floor to let go (or press
+**✅ Done**). Tapping empty floor while nothing is selected drops a new toy,
+as before. Picking a toy in the pane also lets go of the selected one.
+
+| Mode | Move | Resize |
+|------|------|--------|
+| **Desktop** | Click-drag the toy across the floor. Dragging empty space still looks around. | Mouse wheel over the page, or **➕ Bigger** / **➖ Smaller** |
+| **Phone / touch preview** | Drag the toy with one finger | Pinch with two fingers, or the buttons |
+| **AR** | Drag the toy with one finger; it slides along the surface it stands on | Pinch, or the buttons |
+| **VR** | Point at the toy, hold the trigger, and point where it should go | Thumbstick up = bigger, down = smaller |
+
+Each tap on a button is ×1.25 (or ÷1.25). Sizes stay between ¼× and 4×.
+**🔄 Turn** rotates by 45° and **🗑️ Delete** removes the toy. A whole drag,
+pinch or thumbstick push is one Undo step, and a burst of mouse-wheel notches
+is too. The toy you grab stays under your finger, cursor or controller beam.
+
+In AR the whole overlay takes the touches (tap, drag, pinch). The overlay
+cancels `beforexrselect`, so touches don't also become XR "select" events.
+If a browser grants AR without `dom-overlay`, XR select events are used
+instead: tap, or press and drag. VR has no DOM, so the pane's buttons aren't
+there; use the trigger and thumbstick.
 
 ### Toy sizes
 
@@ -92,9 +118,10 @@ extension can fake a headset for quick checks.
 
 ```
 index.html        Page, canvas, Enter VR / Enter AR, toy picker pane (also the AR dom-overlay root)
-js/main.js        Entry point: feature detection, toy picker pane, desktop fallback loop
-js/xr.js          WebXR session: XRWebGLLayer, reference space, frame loop, hit-test, select
-js/scene.js       Shared scene: shaders, grid, placed toys + bounce, VR shelf, controllers, reticle
+js/main.js        Entry point: feature detection, toy pane + edit buttons, desktop fallback loop
+js/interact.js    Mouse / touch / pinch / wheel controls (desktop preview and AR overlay)
+js/xr.js          WebXR session: layer, reference space, frame loop, hit-test, trigger grab, thumbstick
+js/scene.js       Shared scene: toys + bounce, picking, select/move/resize/undo, VR shelf, drawing
 js/models.js      The five toy models as lists of coloured parts (edit here to add toys)
 js/gl.js          Tiny WebGL helper: shader compile/link, buffers, mesh drawing
 js/mat4.js        Minimal column-major 4x4 matrix math
